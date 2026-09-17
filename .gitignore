@@ -6,6 +6,9 @@ node_modules/
 .probe/
 .dsh-probe/
 
+# 安装插件前对 web profile 的备份（含你原有的 profile 配置，不入库）
+.profile-backup/
+
 # 杂项
 *.log
 .DS_Store
