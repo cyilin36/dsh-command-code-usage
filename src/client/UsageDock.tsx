@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react'
-import type { CommandCodeUsageState } from '../types.ts'
+import type { CommandCodeSection, CommandCodeUsageState } from '../types.ts'
 import {
   clampDockPosition, clearKey, computePanelLayout, fetchState, formatCredits,
   formatCreditsCompact, formatRelative, formatRemaining, formatRemainingCompact,
@@ -41,6 +41,14 @@ const DRAG_THRESHOLD_PX = 4
 const STORAGE_POS_KEY = 'dsh-command-code-usage.position'
 /** Persisted minimal-mode preference. */
 const STORAGE_MINIMAL_KEY = 'dsh-command-code-usage.minimal'
+
+/** Human label for each usage section, for partial-availability reporting. */
+const SECTION_LABEL: Record<CommandCodeSection, string> = {
+  account: '账户',
+  credits: '额度',
+  subscription: '订阅',
+  usage: '用量汇总',
+}
 
 /** Active pointer-drag session on the badge. */
 interface DragSession {
@@ -535,9 +543,15 @@ export function UsageDock(): ReactElement {
               )}
 
               {state.usage.unavailable.length > 0 && (
-                <p className="ccu-hint">
-                  接口未返回：{state.usage.unavailable.join(' / ')}（其余数据正常）
-                </p>
+                <div className="ccu-hint">
+                  <div>部分接口未返回（其余数据正常）：</div>
+                  {state.usage.unavailable.map((section) => (
+                    <div key={section} className="ccu-hint-item">
+                      {SECTION_LABEL[section]}：
+                      {state.usage?.unavailableReasons?.[section] ?? '未返回可解析的数据'}
+                    </div>
+                  ))}
+                </div>
               )}
             </>
           ) : (

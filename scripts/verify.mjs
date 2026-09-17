@@ -90,6 +90,25 @@ console.log('用量解析')
   const partial = assembleUsage(whoami, credits, null, null)
   check('部分样本可解析', partial !== undefined)
   check('缺失段被记录', partial?.unavailable.join(',') === 'subscription,usage', partial?.unavailable.join(','))
+  check('缺失段始终带原因（无网络原因时给兜底）',
+    partial?.unavailableReasons?.usage === '响应中没有可用的 usage 数据',
+    partial?.unavailableReasons?.usage)
+
+  // 回归：缺失段必须带上「为什么」，否则线上无法排查（usage 段消失过一次）
+  const withReasons = assembleUsage(whoami, credits, null, null, {
+    subscription: 'Command Code 返回 HTTP 400',
+    usage: '响应中没有可用的 usage 数据',
+  })
+  check('缺失段带原因',
+    withReasons?.unavailableReasons?.subscription === 'Command Code 返回 HTTP 400',
+    withReasons?.unavailableReasons?.subscription)
+  check('原因按段分别记录',
+    withReasons?.unavailableReasons?.usage === '响应中没有可用的 usage 数据')
+  check('原因不泄漏到可用段', withReasons?.unavailableReasons?.credits === undefined)
+  const unusableBody = assembleUsage(whoami, credits, null, { nothing: true })
+  check('接口成功但 body 不可用时给出兜底原因',
+    unusableBody?.unavailableReasons?.usage === '响应中没有可用的 usage 数据',
+    unusableBody?.unavailableReasons?.usage)
   check('仅 whoami 不算样本', assembleUsage(whoami, null, null, null) === undefined)
 
   console.log('  时间戳归一')

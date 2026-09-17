@@ -98,6 +98,15 @@ export interface CommandCodeUsage {
    * instead of rendering an absent section as a real zero.
    */
   unavailable: CommandCodeSection[]
+  /**
+   * Why each unavailable section was missing, keyed by section name.
+   *
+   * Without this a missing section is undiagnosable: "usage did not answer"
+   * reads the same whether the endpoint 404s, rejects the query parameter, or
+   * merely returned an unparseable body. Present only for sections in
+   * {@link unavailable}.
+   */
+  unavailableReasons?: Partial<Record<CommandCodeSection, string>>
 }
 
 /** A usage section name, used to report partial availability. */

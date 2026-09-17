@@ -24,7 +24,7 @@
  * fields are tolerated because the API may grow.
  * @module dsh-command-code-usage/usage
  */
-import type { CommandCodeAccount, CommandCodeCredits, CommandCodeSubscription, CommandCodeUsage, CommandCodeUsageSummary, CommandCodeWindow } from './types.ts';
+import type { CommandCodeAccount, CommandCodeCredits, CommandCodeSection, CommandCodeSubscription, CommandCodeUsage, CommandCodeUsageSummary, CommandCodeWindow } from './types.ts';
 /** Command Code API origin; every endpoint below hangs off it. */
 export declare const DEFAULT_API_BASE = "https://api.commandcode.ai";
 /** Whole-request budget covering all four endpoint calls. */
@@ -74,9 +74,10 @@ export declare function parseWhoami(value: unknown): {
  * @param credits - raw `/alpha/billing/credits` body, or `null` when it failed.
  * @param subscription - raw `/alpha/billing/subscriptions` body, or `null`.
  * @param summary - raw `/alpha/usage/summary` body, or `null`.
+ * @param reasons - why each failed section was missing, for the UI to surface.
  * @returns the sample, or `undefined` when no section is usable.
  */
-export declare function assembleUsage(whoami: unknown, credits: unknown, subscription: unknown, summary: unknown): CommandCodeUsage | undefined;
+export declare function assembleUsage(whoami: unknown, credits: unknown, subscription: unknown, summary: unknown, reasons?: Partial<Record<CommandCodeSection, string>>): CommandCodeUsage | undefined;
 /**
  * Fetch and validate one usage sample from the Command Code alpha API.
  *

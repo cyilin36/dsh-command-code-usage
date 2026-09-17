@@ -189,6 +189,24 @@ export function parseWhoami(value: unknown): { account: CommandCodeAccount; orgI
 }
 
 /**
+ * Read `data.currentPeriodStart` verbatim, as the string the API sent.
+ *
+ * Deliberately NOT routed through {@link normalizeTimestamp}: this value is
+ * echoed back to the API as the `since` query parameter, so any normalization
+ * (epoch seconds → millis, ISO → millis) risks sending a representation the
+ * endpoint refuses. Only non-string scalars are stringified.
+ * @param body - a parsed `/alpha/billing/subscriptions` body, or `null`.
+ * @returns the query-ready value, or `undefined` when the API omitted it.
+ */
+function rawPeriodStart(body: unknown): string | undefined {
+  if (!isRecord(body) || !isRecord(body.data)) return undefined
+  const value = body.data.currentPeriodStart
+  if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return undefined
+}
+
+/**
  * Assemble a sample from the four raw endpoint bodies.
  *
  * Exported separately from the fetch so the parsing rules are unit-testable
@@ -197,6 +215,7 @@ export function parseWhoami(value: unknown): { account: CommandCodeAccount; orgI
  * @param credits - raw `/alpha/billing/credits` body, or `null` when it failed.
  * @param subscription - raw `/alpha/billing/subscriptions` body, or `null`.
  * @param summary - raw `/alpha/usage/summary` body, or `null`.
+ * @param reasons - why each failed section was missing, for the UI to surface.
  * @returns the sample, or `undefined` when no section is usable.
  */
 export function assembleUsage(
@@ -204,22 +223,42 @@ export function assembleUsage(
   credits: unknown,
   subscription: unknown,
   summary: unknown,
+  reasons: Partial<Record<CommandCodeSection, string>> = {},
 ): CommandCodeUsage | undefined {
   const identity = parseWhoami(whoami)
   if (identity === null) return undefined
 
   const unavailable: CommandCodeSection[] = []
+  const unusable: CommandCodeSection[] = []
   const parsedCredits = parseCredits(credits)
-  if (parsedCredits === null) unavailable.push('credits')
+  if (parsedCredits === null) {
+    unavailable.push('credits')
+    unusable.push('credits')
+  }
   const parsedSubscription = parseSubscription(subscription)
-  if (parsedSubscription === null) unavailable.push('subscription')
+  if (parsedSubscription === null) {
+    unavailable.push('subscription')
+    unusable.push('subscription')
+  }
   const parsedSummary = parseSummary(summary)
-  if (parsedSummary === null) unavailable.push('usage')
+  if (parsedSummary === null) {
+    unavailable.push('usage')
+    unusable.push('usage')
+  }
 
   // The account is usable and at least one metered section arrived: this is a
   // real sample. A lone account with nothing else is not worth showing.
   if (parsedCredits === null && parsedSubscription === null && parsedSummary === null) {
     return undefined
+  }
+  // Prefer the transport failure's own message; when the endpoint answered but
+  // the body was unusable, say that instead so the two cases stay distinct.
+  const unavailableReasons: Partial<Record<CommandCodeSection, string>> = {}
+  for (const section of unusable) {
+    const reason = reasons[section]
+    unavailableReasons[section] = reason !== undefined && reason !== ''
+      ? reason
+      : `响应中没有可用的 ${section} 数据`
   }
   return {
     account: identity.account,
@@ -227,6 +266,7 @@ export function assembleUsage(
     ...(parsedSubscription === null ? {} : { subscription: parsedSubscription }),
     ...(parsedSummary === null ? {} : { summary: parsedSummary }),
     unavailable,
+    ...(unusable.length === 0 ? {} : { unavailableReasons }),
   }
 }
 
@@ -320,14 +360,22 @@ export async function fetchCommandCodeUsage(
     read('/alpha/billing/credits', { orgId }),
     read('/alpha/billing/subscriptions', { orgId }),
   ])
+
   // The summary is scoped to the current billing period when the subscription
-  // answered, so it is read after it; `since` is optional and the API falls
-  // back to its own default window when absent.
-  const since = subscription.ok ? parseSubscription(subscription.body)?.currentPeriodStart : null
-  const summary = await read('/alpha/usage/summary', {
-    orgId,
-    since: since === null || since === undefined ? undefined : String(since),
-  })
+  // answered, so it runs after it.
+  //
+  // `since` is forwarded in the SAME representation the API used for
+  // `currentPeriodStart`, never a re-derived one: an earlier revision
+  // normalized it to epoch millis, which the endpoint rejected, silently
+  // costing the spend total and with it the monthly row. Whatever the API
+  // accepts for its own field is what it accepts for this query parameter.
+  const since = rawPeriodStart(subscription.ok ? subscription.body : null)
+  let summary = await read('/alpha/usage/summary', { orgId, since })
+  // A rejected or refused `since` must not cost the whole section: `since` is
+  // optional, so retry unscoped rather than report the summary unavailable.
+  if (!summary.ok && since !== undefined) {
+    summary = await read('/alpha/usage/summary', { orgId })
+  }
 
   // A rejected key on any metered endpoint is fatal rather than a partial
   // sample: `whoami` accepting a key the rest refuse means the plan lacks
@@ -341,6 +389,11 @@ export async function fetchCommandCodeUsage(
     credits.ok ? credits.body : null,
     subscription.ok ? subscription.body : null,
     summary.ok ? summary.body : null,
+    {
+      ...(credits.ok ? {} : { credits: credits.error.message }),
+      ...(subscription.ok ? {} : { subscription: subscription.error.message }),
+      ...(summary.ok ? {} : { usage: summary.error.message }),
+    },
   )
   if (usage === undefined) {
     throw new Error('响应中没有可用的用量数据（credits / subscriptions / usage summary 均不可用）')
