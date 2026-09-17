@@ -1,7 +1,19 @@
 {
   "name": "dsh-command-code-usage",
-  "version": "0.1.0",
-  "description": "Command Code plan usage monitor for DeepSeek Harness: live credits (5h-rolling / weekly windows, monthly+free+purchased pool) in a floating web dock, plus a ready-made command-code model provider preset",
+  "version": "1.0.0",
+  "description": "Command Code plan usage monitor for DeepSeek Harness: a floating web dock showing live credits and the 5h-rolling / weekly quota windows, plus a ready-made command-code model provider preset",
+  "author": {
+    "name": "cyilin36",
+    "url": "https://github.com/cyilin36"
+  },
+  "homepage": "https://github.com/cyilin36/dsh-command-code-usage#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyilin36/dsh-command-code-usage.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cyilin36/dsh-command-code-usage/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -20,6 +32,7 @@
   "files": [
     "lib",
     "cordis.patch.yml",
+    "LICENSE",
     "README.md",
     "README.zh.md"
   ],
@@ -32,7 +45,8 @@
     "command-code",
     "usage",
     "quota",
-    "monitor"
+    "monitor",
+    "credits"
   ],
   "engines": {
     "node": "^22.19.0 || >=24"
