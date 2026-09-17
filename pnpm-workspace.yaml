@@ -1,0 +1,3 @@
+# pnpm >=10 requires an explicit opt-in for dependency build scripts.
+allowBuilds:
+  esbuild: true

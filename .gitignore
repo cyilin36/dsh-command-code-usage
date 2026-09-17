@@ -1,0 +1,11 @@
+# 依赖与包管理器本地状态
+node_modules/
+.pnpm-store/
+
+# 构建/校验期间可能出现的临时目录
+.probe/
+.dsh-probe/
+
+# 杂项
+*.log
+.DS_Store
