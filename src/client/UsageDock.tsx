@@ -417,7 +417,7 @@ export function UsageDock(): ReactElement {
         onPointerCancel={cancelDrag}
         title={minimal
           ? 'Command Code 用量：仅 5h 滚动（极简模式，拖拽可移动）'
-          : 'Command Code 用量：5h 滚动 / 本周 / 本月（拖拽可移动）'}
+          : 'Command Code 用量：5h 滚动 / 本周（拖拽可移动）'}
         aria-expanded={open}
         aria-label="Command Code 用量"
       >
@@ -439,10 +439,9 @@ export function UsageDock(): ReactElement {
             )}
           </>
         ) : pool !== undefined ? (
-          <span className="ccu-badge-text">
-            {formatCreditsCompact(pool.remaining)}
-            {pool.percentUsed === null ? '' : ` · ${Math.round(pool.percentUsed)}%`}
-          </span>
+          // No window data at all: fall back to the pool balance alone. No
+          // percentage accompanies it, because the API states no denominator.
+          <span className="ccu-badge-text">{formatCreditsCompact(pool.remaining)}</span>
         ) : (
           <span className="ccu-badge-text">Cmd Code —</span>
         )}
@@ -504,9 +503,11 @@ export function UsageDock(): ReactElement {
                 </div>
               )}
 
-              {/* The pool headline is the account-level balance. Its sources are
-                  restated here because the monthly row below tracks the pooled
-                  grant, not the individual sources. */}
+              {/* The pool headline is the account-level balance: the three
+                  source balances summed, plus this period's spend when the
+                  summary answered. No "percent used" is shown — the API never
+                  states the grant total, so any such figure would rest on a
+                  denominator this monitor reconstructed rather than read. */}
               {pool !== undefined && (
                 <div className="ccu-pool">
                   <div className="ccu-pool-top">
@@ -518,9 +519,9 @@ export function UsageDock(): ReactElement {
                     </span>
                   </div>
                   <div className="ccu-sources">
-                    <span>订阅 {formatCredits(pool.monthly)}</span>
-                    {pool.purchased > 0 && <span>购买 {formatCredits(pool.purchased)}</span>}
-                    {pool.free > 0 && <span>赠送 {formatCredits(pool.free)}</span>}
+                    <span>订阅余额 {formatCredits(pool.monthly)}</span>
+                    {pool.purchased > 0 && <span>购买余额 {formatCredits(pool.purchased)}</span>}
+                    {pool.free > 0 && <span>赠送余额 {formatCredits(pool.free)}</span>}
                   </div>
                 </div>
               )}

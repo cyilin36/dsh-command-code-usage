@@ -11,15 +11,14 @@
 /** One credit window reported by `GET /alpha/billing/credits`. */
 export interface CommandCodeWindow {
   /**
-   * `fiveHour` (the ~5h rolling window), `weekly`, or `monthly`.
+   * `fiveHour` (the ~5h rolling window) or `weekly`.
    *
-   * Command Code's `windowLimits` is observed to carry `fiveHour` and `weekly`
-   * only. `monthly` is modelled because the plan is billed monthly and the API
-   * may grow the window: when it does report one, the dock uses it verbatim.
-   * When it does not, the dock derives a monthly row from the credit pool
-   * instead of inventing a window.
+   * These are the only two windows the API reports. There is no monthly
+   * window, and none is synthesized: the plan's monthly credit grant is a pool
+   * balance (`credits.monthlyCredits`), not a window with a percentage, so no
+   * monthly percentage can be stated without inventing one.
    */
-  window: 'fiveHour' | 'weekly' | 'monthly'
+  window: 'fiveHour' | 'weekly'
   /** Credits already consumed in this window. */
   used: number
   /** Credits the window allows. */

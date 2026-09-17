@@ -9,7 +9,7 @@
  */
 import type { CommandCodeUsage, CommandCodeUsageState } from '../types.ts';
 /** The rolling credit windows Command Code meters, in display order. */
-export type WindowKey = 'fiveHour' | 'weekly' | 'monthly';
+export type WindowKey = 'fiveHour' | 'weekly';
 /** One credit window in display order. */
 export interface WindowView {
     key: WindowKey;
@@ -29,14 +29,6 @@ export interface WindowView {
     resetAt: number | null;
     /** Full window period in millis (drives the remaining-time ring). */
     periodMs: number;
-    /**
-     * True when this row was reconstructed from the credit pool rather than read
-     * from an API window — the monthly row when `windowLimits` carries no
-     * `monthly`. Informational only: the row renders and behaves identically, so
-     * the flag exists for tests and future surfacing, not for the UI to treat
-     * second-class data as second-class.
-     */
-    derived: boolean;
 }
 /** Tone thresholds for usage rings; `danger` ≥ 85%, `warn` ≥ 60%. */
 export type UsageTone = 'ok' | 'warn' | 'danger';
@@ -61,7 +53,7 @@ export interface PanelLayout {
 }
 /** Gap between the badge and the panel, in px. */
 export declare const PANEL_GAP_PX = 12;
-/** Window periods: 5h rolling and weekly are fixed; monthly is a 30-day cycle. */
+/** Window periods: the rolling window is a fixed 5h, weekly a fixed 7d. */
 export declare const WINDOW_PERIOD_MS: Record<WindowKey, number>;
 /**
  * Clamp a dock position so the badge stays fully inside the viewport.
@@ -84,15 +76,12 @@ export declare function computePanelLayout(pos: DockPosition, badgeSize: BoxSize
 /**
  * Project a sample into ordered credit-window views.
  *
- * `fiveHour` and `weekly` come from the API's `windowLimits`. The `monthly` row
- * is the API's own window when one is reported, and otherwise reconstructed
- * from the credit pool — the same `remaining / (remaining + spent)` derivation
- * the pool headline uses, with the reset instant taken from the billing
- * period's end. A plan that reports neither a monthly window nor a spend total
- * gets no monthly row, because there would be no honest percentage to show.
- *
- * Windows are ordered 5h → 本周 → 本月 for display, matching the sibling
- * OpenCode Go monitor.
+ * Only `fiveHour` and `weekly` exist: those are the two windows the API
+ * reports. Command Code has no monthly window, and none is synthesized —
+ * `credits.monthlyCredits` is the plan's monthly credit *balance*, not a window
+ * with a percentage, so a monthly figure could only be invented. The panel
+ * therefore shows the two real windows plus the pool balance, and says nothing
+ * about a monthly percentage.
  * @param usage - the fetched sample, or `undefined` before the first success.
  * @returns the projected rows, in display order.
  */
@@ -101,7 +90,11 @@ export declare function usageWindows(usage: CommandCodeUsage | undefined): Windo
 export interface PoolView {
     /** Credits still available across all three sources. */
     remaining: number;
-    /** Credits granted by the current billing period. */
+    /**
+     * Remaining credits from the plan's monthly grant. This is a *balance* — the
+     * credit left from one source — not a monthly quota with a total, which is
+     * why no monthly percentage is shown anywhere.
+     */
     monthly: number;
     /** Credits bought on top of the plan. */
     purchased: number;
@@ -109,21 +102,19 @@ export interface PoolView {
     free: number;
     /**
      * Money already spent this billing period, from the usage summary. `null`
-     * when the summary was unavailable, so the pool percentage is withheld
-     * rather than computed against a partial denominator.
+     * when the summary was unavailable. Reported as the raw figure the API gave;
+     * it is not turned into a percentage against a reconstructed pool.
      */
     spent: number | null;
-    /** Percent of the pooled grant already used, or `null` when not derivable. */
-    percentUsed: number | null;
 }
 /**
  * Project the credit pool headline.
  *
- * The denominator is the remaining grant plus what was spent this period.
- * Command Code's `remaining` is a live balance the API does not restate as a
- * grant, so the original pool is reconstructed from the two facts together;
- * when the summary is missing, no honest percentage exists and one is not
- * invented.
+ * Only facts the API stated are projected: the three source balances, their
+ * sum, and this period's spend. No "percent of grant used" is computed — the
+ * API never states the grant total, so any such percentage would rest on a
+ * reconstructed denominator, and this monitor reports what it was told rather
+ * than what it can infer.
  */
 export declare function poolView(usage: CommandCodeUsage | undefined): PoolView | undefined;
 /**

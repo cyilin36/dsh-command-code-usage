@@ -45,13 +45,8 @@ export declare function normalizeResetAt(value: unknown): number | null;
  * A window that reports `used: 0, cap: 0` is dropped rather than rendered as
  * a 0%-of-0 ring: Command Code omits windows a plan does not have, and an
  * empty window carries no information.
- *
- * `monthly` is read when present. It is not observed in the wild — the API's
- * `windowLimits` carries `fiveHour` and `weekly` — but reading it costs
- * nothing and means a plan that starts reporting a real monthly window gets it
- * shown verbatim instead of falling back to the derived row.
  * @param value - the raw `windowLimits` field.
- * @returns the usable windows, `fiveHour` → `weekly` → `monthly`.
+ * @returns the usable windows, `fiveHour` before `weekly`.
  */
 export declare function windowLimitsFromCredits(value: unknown): CommandCodeWindow[];
 /** Parse the `/alpha/billing/credits` body; `null` when unusable. */

@@ -75,16 +75,16 @@ console.log('用量解析')
   check('缺 purchased/free 补 0', parseCredits({ credits: { monthlyCredits: 7 } })?.purchased === 0)
   check('0/0 窗口被丢弃', windowLimitsFromCredits({ weekly: { used: 0, cap: 0 } }).length === 0)
   check('缺 cap 的窗口被丢弃', windowLimitsFromCredits({ weekly: { used: 3 } }).length === 0)
-  check('窗口顺序 fiveHour→weekly→monthly',
+  check('窗口顺序 fiveHour 先',
     windowLimitsFromCredits({
-      monthly: { used: 1, cap: 2 },
       weekly: { used: 1, cap: 2 },
       fiveHour: { used: 1, cap: 2 },
-    }).map((w) => w.window).join(',') === 'fiveHour,weekly,monthly')
-  check('API 若返回 monthly 则读取',
-    windowLimitsFromCredits({ monthly: { used: 20, cap: 100, resetAt: 1_700_000_000_000 } })[0]?.window === 'monthly')
+    }).map((w) => w.window).join(',') === 'fiveHour,weekly')
   check('未观察到的窗口被忽略',
     windowLimitsFromCredits({ daily: { used: 1, cap: 2 } }).length === 0)
+  // 明确不做月度窗口：API 只给 fiveHour/weekly，monthly 必须被忽略而不是猜出来
+  check('monthly 不作为窗口被接受',
+    windowLimitsFromCredits({ monthly: { used: 20, cap: 100 } }).length === 0)
 
   // 部分可用：只有 credits 成功
   const partial = assembleUsage(whoami, credits, null, null)
@@ -133,72 +133,39 @@ console.log('窗口投影')
     unavailable: [],
   }
   const windows = usageWindows(usage)
-  // 本月由额度池推导（本例无 API monthly 窗口，也无 summary → 不推导）
-  check('无 summary 时不推导本月', windows.map((w) => w.key).join(',') === 'fiveHour,weekly',
+  check('只有两个窗口', windows.map((w) => w.key).join(',') === 'fiveHour,weekly',
     windows.map((w) => w.key).join(','))
   check('5h 百分比', Math.round(windows[0].percent) === 25, String(windows[0].percent))
   check('5h 剩余额度', windows[0].remaining === 9)
   check('本周百分比', Math.round(windows[1].percent) === 25, String(windows[1].percent))
   check('标签', windows[0].label === '5h 滚动' && windows[1].label === '本周')
-  check('API 窗口非 derived', windows[0].derived === false && windows[1].derived === false)
   check('周期常量',
     WINDOW_PERIOD_MS.fiveHour === 5 * 3600_000
     && WINDOW_PERIOD_MS.weekly === 7 * 86400_000
-    && WINDOW_PERIOD_MS.monthly === 30 * 86400_000)
+    && Object.keys(WINDOW_PERIOD_MS).length === 2)
   check('无 credits 时为空', usageWindows(undefined).length === 0)
   check('cap 为 0 跳过', usageWindows({ credits: { monthly: 0, purchased: 0, free: 0, remaining: 0, windows: [{ window: 'weekly', used: 0, cap: 0, resetAt: null }] }, unavailable: [] }).length === 0)
 
-  console.log('本月窗口')
-  // 有 summary 时从额度池推导本月：cap = 剩余 + 已花 = 55 + 12.5 = 67.5
-  const derived = usageWindows({ ...usage, summary: { totalCost: 12.5, totalCount: 3 } })
-  check('本月被推导出来', derived.map((w) => w.key).join(',') === 'fiveHour,weekly,monthly',
-    derived.map((w) => w.key).join(','))
-  const monthly = derived[2]
-  check('本月标记为 derived', monthly.derived === true)
-  check('本月已用 = 本期花费', monthly.used === 12.5, String(monthly.used))
-  check('本月总额 = 剩余 + 已花', monthly.cap === 67.5, String(monthly.cap))
-  check('本月剩余 = 额度池剩余', monthly.remaining === 55, String(monthly.remaining))
-  check('本月百分比', Math.round(monthly.percent) === 19, String(monthly.percent))
-  check('本月标签', monthly.label === '本月' && monthly.sublabel === 'Monthly')
-  check('本月 resetAt 取自计费周期末（缺省为 null）', monthly.resetAt === null)
-  const withPeriod = usageWindows({
-    ...usage,
-    summary: { totalCost: 12.5, totalCount: 3 },
-    subscription: { planId: 'goat', status: 'active', currentPeriodStart: null, currentPeriodEnd: 1_800_000_000_000 },
-  })
-  check('有计费周期末时本月带 resetAt', withPeriod[2].resetAt === 1_800_000_000_000,
-    String(withPeriod[2].resetAt))
-
-  // API 真返回 monthly 时必须原样使用，不能被推导值顶掉
-  const apiMonthly = usageWindows({
-    credits: {
-      monthly: 40, purchased: 10, free: 5, remaining: 55,
-      windows: [
-        { window: 'fiveHour', used: 3, cap: 12, resetAt: null },
-        { window: 'monthly', used: 20, cap: 100, resetAt: 1_700_000_000_000 },
-      ],
-    },
-    summary: { totalCost: 12.5, totalCount: 3 },
-    unavailable: [],
-  })
-  const apiRow = apiMonthly.find((w) => w.key === 'monthly')
-  check('API 的 monthly 优先于推导', apiRow?.derived === false, String(apiRow?.derived))
-  check('API 的 monthly 数值原样', apiRow?.used === 20 && apiRow?.cap === 100)
-  check('API 的 monthly 只出现一次', apiMonthly.filter((w) => w.key === 'monthly').length === 1)
-  check('仅有 monthly 时也投影', usageWindows({
-    credits: { monthly: 1, purchased: 0, free: 0, remaining: 1, windows: [{ window: 'monthly', used: 1, cap: 2, resetAt: null }] },
-    unavailable: [],
-  }).map((w) => w.key).join(',') === 'monthly')
+  // 关键：补齐 summary 后也不能冒出第三行 —— 本插件不做任何月度推算
+  check('有 summary 也不产生本月行',
+    usageWindows({ ...usage, summary: { totalCost: 12.5, totalCount: 3 } })
+      .map((w) => w.key).join(',') === 'fiveHour,weekly')
+  check('有计费周期也不产生本月行',
+    usageWindows({
+      ...usage,
+      summary: { totalCost: 12.5, totalCount: 3 },
+      subscription: { planId: 'goat', status: 'active', currentPeriodStart: null, currentPeriodEnd: 1_800_000_000_000 },
+    }).length === 2)
 
   console.log('额度池')
   const pool = poolView({ credits: usage.credits, summary: { totalCost: 12.5, totalCount: 3 }, unavailable: [] })
   check('剩余额度', pool?.remaining === 55)
   check('来源拆分', pool?.monthly === 40 && pool?.purchased === 10 && pool?.free === 5)
-  check('已花金额', pool?.spent === 12.5)
-  check('已用百分比（分母=剩余+已花）', Math.round(pool?.percentUsed ?? 0) === 19, String(pool?.percentUsed))
+  check('已花金额原样', pool?.spent === 12.5)
+  check('额度池不产出百分比', !('percentUsed' in (pool ?? {})))
   check('无 credits 返回 undefined', poolView(undefined) === undefined)
   const poolNoSummary = poolView({ credits: usage.credits, unavailable: ['usage'] })
-  check('缺 summary 时不给百分比', poolNoSummary?.percentUsed === null)
+  check('缺 summary 时 spent 为 null', poolNoSummary?.spent === null)
   check('缺 summary 时仍报剩余', poolNoSummary?.remaining === 55)
 }
 

@@ -1,8 +1,7 @@
 # dsh-command-code-usage
 
 **Command Code plan usage monitor** for DeepSeek Harness: a floating web dock
-showing live remaining credits plus the 5h-rolling, weekly and monthly quota
-windows,
+showing live remaining credits plus the 5h-rolling and weekly quota windows,
 bundled with a ready-made **Command Code provider preset** so the API key can be
 entered on the standard **Settings → Models** page.
 
@@ -77,17 +76,18 @@ A frosted-glass floating badge in the bottom-right (mounted through the web
 shell's `shell.overlay` slot, falling back to a body portal when that seat is
 unavailable):
 
-- **Badge (collapsed)**: three mini double rings show the 5h-rolling, weekly and
-  monthly credits. The outer ring is the **remaining** share (a full ring when
+- **Badge (collapsed)**: two mini double rings show the 5h-rolling and weekly
+  credits. The outer ring is the **remaining** share (a full ring when
   unused, shrinking as credits are spent; threshold-colored by spent share —
   green <60% / amber ≥60% / red ≥85%), the inner ring is remaining window time
   (brand blue, ticking down). A second-precision countdown for the 5h window
   (`↻3h25m`) and a health dot sit alongside.
 - **Panel (click to expand)**: account name and plan tag; the credit-pool
-  headline (remaining amount) with the three sources (subscription / purchased /
-  free); three window rows (double ring + `used / cap (percent)` + remaining +
-  reset countdown); request and token totals for the period. The footer carries
-  the updated-at line, clear-key, and refresh. A **minimal-mode** switch sits in
+  headline (remaining amount) with the three source balances (subscription /
+  purchased / free); two window rows (double ring + `used / cap (percent)` +
+  remaining + reset countdown); this period's spend, request and token totals.
+  The footer carries the updated-at line, clear-key, and refresh. A
+  **minimal-mode** switch sits in
   the header: it collapses the whole dock to the single 5h-rolling ring (the
   badge keeps only that ring, dropping the countdown and health dot; the panel
   keeps only the 5h row), and the preference persists.
@@ -112,32 +112,38 @@ alone — a plan without a credit grant still reports usage, and one endpoint
 failing does not discard the others. Missing sections are named at the bottom of
 the panel rather than rendered as a real zero.
 
-## What the "monthly" row actually is
+## Why there is no "monthly" quota row
 
-Command Code's quota model differs from OpenCode Go's, and the difference is
-worth stating plainly:
+The reference plugin `dsh-opencode-go-usage` has a monthly row; this one does
+**not**. That is not an omission — the two upstreams model quota differently:
 
 | | OpenCode Go | Command Code |
 | --- | --- | --- |
-| Source | `/usage` returns rolling / weekly / **monthly** windows, each with a percent and a reset instant | `windowLimits` carries only `fiveHour` and `weekly` |
-| "Monthly" | A real monthly window | `credits.monthlyCredits` is a credit-pool **source** (the plan's grant), not a window |
+| Windows | `/usage` returns rolling / weekly / **monthly**, each with a percent and a reset instant | `windowLimits` carries **only** `fiveHour` and `weekly` |
+| "Monthly" | A real monthly window | **No monthly window exists** |
+| `monthlyCredits` | — | The subscription source's remaining **balance** (money), not a window with a percent |
 
-So this plugin resolves the monthly row in this order:
+The decisive point: `credits.monthlyCredits` is only a *balance* — the API never
+states how much the month granted in total. With no denominator there is no
+percentage to compute.
 
-1. **The API's own `monthly` window, when one is reported** — used verbatim,
-   numbers and reset instant alike.
-2. **Otherwise, derived from the credit pool** — used = this period's spend
-   (`usage/summary.totalCost`), cap = `remaining + spent`, percent = their ratio,
-   and the reset instant taken from the billing period's end
-   (`currentPeriodEnd`). This matches how the reference monitor computes its
-   used-percent.
-3. **Neither available → no row.** With no spend total there is no honest
-   percentage, so none is invented; the panel then shows only the 5h and weekly
-   rows.
+**This plugin performs no monthly derivation.** An earlier revision reconstructed
+a monthly percentage from `spent / (remaining + spent)`; that was removed. The
+denominator was assembled rather than reported, so the resulting figure would
+have read like an official quota while actually being an inference. Better to
+omit a row than to show an authoritative-looking guess.
 
-In other words, **the monthly row only appears when it has a real basis** —
-either straight from the API or derived from two trustworthy numbers. It is
-never rendered as a fabricated 0% or 100%.
+Everything the panel shows is therefore a fact the API stated:
+
+- **The two windows that exist** (5h-rolling / weekly), with the API's own used,
+  cap, and reset instant
+- **Pool balances**: each of the three sources (subscription / purchased / free)
+  and their sum
+- **This period's spend**: `usage/summary.totalCost`, shown verbatim and used in
+  no ratio
+
+If you want a monthly view, the subscription balance is literally what is left of
+the monthly grant — it simply does not carry a percentage.
 
 ## Configuration
 

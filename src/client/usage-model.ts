@@ -11,7 +11,7 @@
 import type { CommandCodeUsage, CommandCodeUsageState } from '../types.ts'
 
 /** The rolling credit windows Command Code meters, in display order. */
-export type WindowKey = 'fiveHour' | 'weekly' | 'monthly'
+export type WindowKey = 'fiveHour' | 'weekly'
 
 /** One credit window in display order. */
 export interface WindowView {
@@ -32,14 +32,6 @@ export interface WindowView {
   resetAt: number | null
   /** Full window period in millis (drives the remaining-time ring). */
   periodMs: number
-  /**
-   * True when this row was reconstructed from the credit pool rather than read
-   * from an API window — the monthly row when `windowLimits` carries no
-   * `monthly`. Informational only: the row renders and behaves identically, so
-   * the flag exists for tests and future surfacing, not for the UI to treat
-   * second-class data as second-class.
-   */
-  derived: boolean
 }
 
 /** Tone thresholds for usage rings; `danger` ≥ 85%, `warn` ≥ 60%. */
@@ -70,20 +62,15 @@ export interface PanelLayout {
 /** Gap between the badge and the panel, in px. */
 export const PANEL_GAP_PX = 12
 
-/** Window periods: 5h rolling and weekly are fixed; monthly is a 30-day cycle. */
+/** Window periods: the rolling window is a fixed 5h, weekly a fixed 7d. */
 export const WINDOW_PERIOD_MS: Record<WindowKey, number> = {
   fiveHour: 5 * 60 * 60 * 1000,
   weekly: 7 * 24 * 60 * 60 * 1000,
-  // The API reports only the next reset instant, so the exact billing cycle
-  // cannot be derived; 30 days is the documented approximation, matching the
-  // sibling OpenCode Go monitor.
-  monthly: 30 * 24 * 60 * 60 * 1000,
 }
 
 const WINDOW_META: Record<WindowKey, { label: string; sublabel: string }> = {
   fiveHour: { label: '5h 滚动', sublabel: '5h Rolling' },
   weekly: { label: '本周', sublabel: 'Weekly' },
-  monthly: { label: '本月', sublabel: 'Monthly' },
 }
 
 /**
@@ -123,49 +110,24 @@ export function computePanelLayout(
 /**
  * Project a sample into ordered credit-window views.
  *
- * `fiveHour` and `weekly` come from the API's `windowLimits`. The `monthly` row
- * is the API's own window when one is reported, and otherwise reconstructed
- * from the credit pool — the same `remaining / (remaining + spent)` derivation
- * the pool headline uses, with the reset instant taken from the billing
- * period's end. A plan that reports neither a monthly window nor a spend total
- * gets no monthly row, because there would be no honest percentage to show.
- *
- * Windows are ordered 5h → 本周 → 本月 for display, matching the sibling
- * OpenCode Go monitor.
+ * Only `fiveHour` and `weekly` exist: those are the two windows the API
+ * reports. Command Code has no monthly window, and none is synthesized —
+ * `credits.monthlyCredits` is the plan's monthly credit *balance*, not a window
+ * with a percentage, so a monthly figure could only be invented. The panel
+ * therefore shows the two real windows plus the pool balance, and says nothing
+ * about a monthly percentage.
  * @param usage - the fetched sample, or `undefined` before the first success.
  * @returns the projected rows, in display order.
  */
 export function usageWindows(usage: CommandCodeUsage | undefined): WindowView[] {
-  if (usage === undefined) return []
-  const credits = usage.credits
-  const windows = credits?.windows ?? []
-
+  const windows = usage?.credits?.windows ?? []
   const views: WindowView[] = []
-  for (const key of ['fiveHour', 'weekly', 'monthly'] as const) {
+  for (const key of ['fiveHour', 'weekly'] as const) {
     const window = windows.find((candidate) => candidate.window === key)
     if (window === undefined) continue
     // A zero cap carries no information and no percentage to draw.
     if (window.cap <= 0) continue
-    views.push(buildWindow(key, window.used, window.cap, window.resetAt, false))
-  }
-
-  // Derive the monthly row only when the API did not report one, so a real
-  // window is never shadowed by the approximation.
-  if (credits !== undefined && !windows.some((w) => w.window === 'monthly')) {
-    const pool = poolView(usage)
-    if (pool !== undefined && pool.percentUsed !== null) {
-      const spent = pool.spent ?? 0
-      const cap = pool.remaining + spent
-      if (cap > 0) {
-        views.push(buildWindow(
-          'monthly',
-          spent,
-          cap,
-          usage.subscription?.currentPeriodEnd ?? null,
-          true,
-        ))
-      }
-    }
+    views.push(buildWindow(key, window.used, window.cap, window.resetAt))
   }
   return views
 }
@@ -176,7 +138,6 @@ function buildWindow(
   used: number,
   cap: number,
   resetAt: number | null,
-  derived: boolean,
 ): WindowView {
   return {
     key,
@@ -188,7 +149,6 @@ function buildWindow(
     percent: cap <= 0 ? 0 : Math.min(100, Math.max(0, (used / cap) * 100)),
     resetAt,
     periodMs: WINDOW_PERIOD_MS[key],
-    derived,
   }
 }
 
@@ -196,7 +156,11 @@ function buildWindow(
 export interface PoolView {
   /** Credits still available across all three sources. */
   remaining: number
-  /** Credits granted by the current billing period. */
+  /**
+   * Remaining credits from the plan's monthly grant. This is a *balance* — the
+   * credit left from one source — not a monthly quota with a total, which is
+   * why no monthly percentage is shown anywhere.
+   */
   monthly: number
   /** Credits bought on top of the plan. */
   purchased: number
@@ -204,35 +168,30 @@ export interface PoolView {
   free: number
   /**
    * Money already spent this billing period, from the usage summary. `null`
-   * when the summary was unavailable, so the pool percentage is withheld
-   * rather than computed against a partial denominator.
+   * when the summary was unavailable. Reported as the raw figure the API gave;
+   * it is not turned into a percentage against a reconstructed pool.
    */
   spent: number | null
-  /** Percent of the pooled grant already used, or `null` when not derivable. */
-  percentUsed: number | null
 }
 
 /**
  * Project the credit pool headline.
  *
- * The denominator is the remaining grant plus what was spent this period.
- * Command Code's `remaining` is a live balance the API does not restate as a
- * grant, so the original pool is reconstructed from the two facts together;
- * when the summary is missing, no honest percentage exists and one is not
- * invented.
+ * Only facts the API stated are projected: the three source balances, their
+ * sum, and this period's spend. No "percent of grant used" is computed — the
+ * API never states the grant total, so any such percentage would rest on a
+ * reconstructed denominator, and this monitor reports what it was told rather
+ * than what it can infer.
  */
 export function poolView(usage: CommandCodeUsage | undefined): PoolView | undefined {
   const credits = usage?.credits
   if (credits === undefined) return undefined
-  const spent = usage?.summary?.totalCost ?? null
-  const pool = credits.remaining + (spent ?? 0)
   return {
     remaining: credits.remaining,
     monthly: credits.monthly,
     purchased: credits.purchased,
     free: credits.free,
-    spent,
-    percentUsed: spent === null || pool <= 0 ? null : Math.min(100, (spent / pool) * 100),
+    spent: usage?.summary?.totalCost ?? null,
   }
 }
 
