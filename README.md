@@ -1,7 +1,8 @@
 # dsh-command-code-usage
 
 **Command Code plan usage monitor** for DeepSeek Harness: a floating web dock
-showing live remaining credits plus the 5h-rolling and weekly quota windows,
+showing live remaining credits plus the 5h-rolling, weekly and monthly quota
+windows,
 bundled with a ready-made **Command Code provider preset** so the API key can be
 entered on the standard **Settings → Models** page.
 
@@ -76,17 +77,20 @@ A frosted-glass floating badge in the bottom-right (mounted through the web
 shell's `shell.overlay` slot, falling back to a body portal when that seat is
 unavailable):
 
-- **Badge (collapsed)**: two mini double rings show the 5h-rolling and weekly
-  credits. The outer ring is the **remaining** share (a full ring when unused,
-  shrinking as credits are spent; threshold-colored by spent share — green <60%
-  / amber ≥60% / red ≥85%), the inner ring is remaining window time (brand blue,
-  ticking down). A second-precision countdown for the 5h window (`↻3h25m`) and a
-  health dot sit alongside.
+- **Badge (collapsed)**: three mini double rings show the 5h-rolling, weekly and
+  monthly credits. The outer ring is the **remaining** share (a full ring when
+  unused, shrinking as credits are spent; threshold-colored by spent share —
+  green <60% / amber ≥60% / red ≥85%), the inner ring is remaining window time
+  (brand blue, ticking down). A second-precision countdown for the 5h window
+  (`↻3h25m`) and a health dot sit alongside.
 - **Panel (click to expand)**: account name and plan tag; the credit-pool
-  headline (remaining amount), a used-percent bar, and the three sources
-  (subscription / purchased / free); two window rows (double ring +
-  `used / cap` + reset countdown); request and token totals for the period.
-  The footer carries the updated-at line, clear-key, and refresh.
+  headline (remaining amount) with the three sources (subscription / purchased /
+  free); three window rows (double ring + `used / cap (percent)` + remaining +
+  reset countdown); request and token totals for the period. The footer carries
+  the updated-at line, clear-key, and refresh. A **minimal-mode** switch sits in
+  the header: it collapses the whole dock to the single 5h-rolling ring (the
+  badge keeps only that ring, dropping the countdown and health dot; the panel
+  keeps only the 5h row), and the preference persists.
 - **Dragging**: grab the badge and drop it anywhere (a press only counts as a
   drag past 4px of travel, so a plain click still toggles). The position persists
   in localStorage and is re-clamped into the viewport on resize. The panel
@@ -107,6 +111,33 @@ Command Code's four endpoints are individually optional: `whoami` must succeed
 alone — a plan without a credit grant still reports usage, and one endpoint
 failing does not discard the others. Missing sections are named at the bottom of
 the panel rather than rendered as a real zero.
+
+## What the "monthly" row actually is
+
+Command Code's quota model differs from OpenCode Go's, and the difference is
+worth stating plainly:
+
+| | OpenCode Go | Command Code |
+| --- | --- | --- |
+| Source | `/usage` returns rolling / weekly / **monthly** windows, each with a percent and a reset instant | `windowLimits` carries only `fiveHour` and `weekly` |
+| "Monthly" | A real monthly window | `credits.monthlyCredits` is a credit-pool **source** (the plan's grant), not a window |
+
+So this plugin resolves the monthly row in this order:
+
+1. **The API's own `monthly` window, when one is reported** — used verbatim,
+   numbers and reset instant alike.
+2. **Otherwise, derived from the credit pool** — used = this period's spend
+   (`usage/summary.totalCost`), cap = `remaining + spent`, percent = their ratio,
+   and the reset instant taken from the billing period's end
+   (`currentPeriodEnd`). This matches how the reference monitor computes its
+   used-percent.
+3. **Neither available → no row.** With no spend total there is no honest
+   percentage, so none is invented; the panel then shows only the 5h and weekly
+   rows.
+
+In other words, **the monthly row only appears when it has a real basis** —
+either straight from the API or derived from two trustworthy numbers. It is
+never rendered as a fabricated 0% or 100%.
 
 ## Configuration
 

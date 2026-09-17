@@ -91,18 +91,23 @@ function normalizeTimestamp(value: unknown): number | null {
 }
 
 /**
- * Read the two rolling credit windows out of a credits response.
+ * Read the credit windows out of a credits response.
  *
  * A window that reports `used: 0, cap: 0` is dropped rather than rendered as
  * a 0%-of-0 ring: Command Code omits windows a plan does not have, and an
  * empty window carries no information.
+ *
+ * `monthly` is read when present. It is not observed in the wild — the API's
+ * `windowLimits` carries `fiveHour` and `weekly` — but reading it costs
+ * nothing and means a plan that starts reporting a real monthly window gets it
+ * shown verbatim instead of falling back to the derived row.
  * @param value - the raw `windowLimits` field.
- * @returns the usable windows, `fiveHour` before `weekly`.
+ * @returns the usable windows, `fiveHour` → `weekly` → `monthly`.
  */
 export function windowLimitsFromCredits(value: unknown): CommandCodeWindow[] {
   if (!isRecord(value)) return []
   const windows: CommandCodeWindow[] = []
-  for (const window of ['fiveHour', 'weekly'] as const) {
+  for (const window of ['fiveHour', 'weekly', 'monthly'] as const) {
     const entry = value[window]
     if (!isRecord(entry)) continue
     const used = numberValue(entry.used)

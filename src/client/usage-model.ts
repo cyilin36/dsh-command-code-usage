@@ -11,7 +11,7 @@
 import type { CommandCodeUsage, CommandCodeUsageState } from '../types.ts'
 
 /** The rolling credit windows Command Code meters, in display order. */
-export type WindowKey = 'fiveHour' | 'weekly'
+export type WindowKey = 'fiveHour' | 'weekly' | 'monthly'
 
 /** One credit window in display order. */
 export interface WindowView {
@@ -32,6 +32,14 @@ export interface WindowView {
   resetAt: number | null
   /** Full window period in millis (drives the remaining-time ring). */
   periodMs: number
+  /**
+   * True when this row was reconstructed from the credit pool rather than read
+   * from an API window — the monthly row when `windowLimits` carries no
+   * `monthly`. Informational only: the row renders and behaves identically, so
+   * the flag exists for tests and future surfacing, not for the UI to treat
+   * second-class data as second-class.
+   */
+  derived: boolean
 }
 
 /** Tone thresholds for usage rings; `danger` ≥ 85%, `warn` ≥ 60%. */
@@ -62,15 +70,20 @@ export interface PanelLayout {
 /** Gap between the badge and the panel, in px. */
 export const PANEL_GAP_PX = 12
 
-/** Window periods: the rolling window is a fixed 5h, weekly a fixed 7d. */
+/** Window periods: 5h rolling and weekly are fixed; monthly is a 30-day cycle. */
 export const WINDOW_PERIOD_MS: Record<WindowKey, number> = {
   fiveHour: 5 * 60 * 60 * 1000,
   weekly: 7 * 24 * 60 * 60 * 1000,
+  // The API reports only the next reset instant, so the exact billing cycle
+  // cannot be derived; 30 days is the documented approximation, matching the
+  // sibling OpenCode Go monitor.
+  monthly: 30 * 24 * 60 * 60 * 1000,
 }
 
 const WINDOW_META: Record<WindowKey, { label: string; sublabel: string }> = {
   fiveHour: { label: '5h 滚动', sublabel: '5h Rolling' },
   weekly: { label: '本周', sublabel: 'Weekly' },
+  monthly: { label: '本月', sublabel: 'Monthly' },
 }
 
 /**
@@ -107,31 +120,76 @@ export function computePanelLayout(
   return { below, useLeft, leftOffset }
 }
 
-/** Project a sample's credit windows into ordered views (missing windows dropped). */
+/**
+ * Project a sample into ordered credit-window views.
+ *
+ * `fiveHour` and `weekly` come from the API's `windowLimits`. The `monthly` row
+ * is the API's own window when one is reported, and otherwise reconstructed
+ * from the credit pool — the same `remaining / (remaining + spent)` derivation
+ * the pool headline uses, with the reset instant taken from the billing
+ * period's end. A plan that reports neither a monthly window nor a spend total
+ * gets no monthly row, because there would be no honest percentage to show.
+ *
+ * Windows are ordered 5h → 本周 → 本月 for display, matching the sibling
+ * OpenCode Go monitor.
+ * @param usage - the fetched sample, or `undefined` before the first success.
+ * @returns the projected rows, in display order.
+ */
 export function usageWindows(usage: CommandCodeUsage | undefined): WindowView[] {
   if (usage === undefined) return []
-  const windows = usage.credits?.windows
-  if (windows === undefined) return []
+  const credits = usage.credits
+  const windows = credits?.windows ?? []
+
   const views: WindowView[] = []
-  for (const key of ['fiveHour', 'weekly'] as const) {
+  for (const key of ['fiveHour', 'weekly', 'monthly'] as const) {
     const window = windows.find((candidate) => candidate.window === key)
     if (window === undefined) continue
     // A zero cap carries no information and no percentage to draw.
     if (window.cap <= 0) continue
-    const percent = (window.used / window.cap) * 100
-    views.push({
-      key,
-      label: WINDOW_META[key].label,
-      sublabel: WINDOW_META[key].sublabel,
-      used: window.used,
-      cap: window.cap,
-      remaining: Math.max(0, window.cap - window.used),
-      percent: Math.min(100, Math.max(0, percent)),
-      resetAt: window.resetAt,
-      periodMs: WINDOW_PERIOD_MS[key],
-    })
+    views.push(buildWindow(key, window.used, window.cap, window.resetAt, false))
+  }
+
+  // Derive the monthly row only when the API did not report one, so a real
+  // window is never shadowed by the approximation.
+  if (credits !== undefined && !windows.some((w) => w.window === 'monthly')) {
+    const pool = poolView(usage)
+    if (pool !== undefined && pool.percentUsed !== null) {
+      const spent = pool.spent ?? 0
+      const cap = pool.remaining + spent
+      if (cap > 0) {
+        views.push(buildWindow(
+          'monthly',
+          spent,
+          cap,
+          usage.subscription?.currentPeriodEnd ?? null,
+          true,
+        ))
+      }
+    }
   }
   return views
+}
+
+/** Assemble one window view from its raw numbers. */
+function buildWindow(
+  key: WindowKey,
+  used: number,
+  cap: number,
+  resetAt: number | null,
+  derived: boolean,
+): WindowView {
+  return {
+    key,
+    label: WINDOW_META[key].label,
+    sublabel: WINDOW_META[key].sublabel,
+    used,
+    cap,
+    remaining: Math.max(0, cap - used),
+    percent: cap <= 0 ? 0 : Math.min(100, Math.max(0, (used / cap) * 100)),
+    resetAt,
+    periodMs: WINDOW_PERIOD_MS[key],
+    derived,
+  }
 }
 
 /** The credit pool headline, or `undefined` when the API reported no credits. */

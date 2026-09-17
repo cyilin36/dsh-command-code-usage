@@ -9,8 +9,16 @@
  */
 /** One credit window reported by `GET /alpha/billing/credits`. */
 export interface CommandCodeWindow {
-    /** `fiveHour` (the ~5h rolling window) or `weekly`. */
-    window: 'fiveHour' | 'weekly';
+    /**
+     * `fiveHour` (the ~5h rolling window), `weekly`, or `monthly`.
+     *
+     * Command Code's `windowLimits` is observed to carry `fiveHour` and `weekly`
+     * only. `monthly` is modelled because the plan is billed monthly and the API
+     * may grow the window: when it does report one, the dock uses it verbatim.
+     * When it does not, the dock derives a monthly row from the credit pool
+     * instead of inventing a window.
+     */
+    window: 'fiveHour' | 'weekly' | 'monthly';
     /** Credits already consumed in this window. */
     used: number;
     /** Credits the window allows. */

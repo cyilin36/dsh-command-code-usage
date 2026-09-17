@@ -39,6 +39,8 @@ const DRAG_THRESHOLD_PX = 4
 
 /** localStorage keys for persisted dock preferences. */
 const STORAGE_POS_KEY = 'dsh-command-code-usage.position'
+/** Persisted minimal-mode preference. */
+const STORAGE_MINIMAL_KEY = 'dsh-command-code-usage.minimal'
 
 /** Active pointer-drag session on the badge. */
 interface DragSession {
@@ -74,6 +76,16 @@ function loadPosition(): DockPosition | null {
   }
 }
 
+/** Read the persisted minimal-mode flag. */
+function loadMinimal(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(STORAGE_MINIMAL_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 /** Clamp a dock position so the badge stays fully inside the viewport. */
 function clampToViewport(pos: DockPosition, sizeW: number, sizeH: number): DockPosition {
   return clampDockPosition(pos, { w: sizeW, h: sizeH }, { w: window.innerWidth, h: window.innerHeight })
@@ -95,6 +107,8 @@ export function UsageDock(): ReactElement {
   const [badgeSize, setBadgeSize] = useState<{ w: number; h: number } | null>(null)
   const [panelSize, setPanelSize] = useState<{ w: number; h: number } | null>(null)
   const [dragging, setDragging] = useState(false)
+  // Minimal mode: the dock collapses to a single 5h-rolling ring.
+  const [minimal, setMinimal] = useState(loadMinimal)
   // Key-entry form state.
   const [draftKey, setDraftKey] = useState('')
   const [keyBusy, setKeyBusy] = useState(false)
@@ -142,6 +156,16 @@ export function UsageDock(): ReactElement {
       // Storage unavailable (private mode): the position just does not persist.
     }
   }, [pos])
+
+  // Persist the minimal-mode preference.
+  useEffect(() => {
+    try {
+      if (minimal) window.localStorage.setItem(STORAGE_MINIMAL_KEY, '1')
+      else window.localStorage.removeItem(STORAGE_MINIMAL_KEY)
+    } catch {
+      // Storage unavailable: the choice just does not persist.
+    }
+  }, [minimal])
 
   // Keep the badge inside the viewport when the window resizes.
   useEffect(() => {
@@ -347,6 +371,10 @@ export function UsageDock(): ReactElement {
 
   const windows = usageWindows(stateHasUsage(state) ? state.usage : undefined)
   const rolling = windows.find((window) => window.key === 'fiveHour')
+  // Minimal mode collapses the dock to the 5h-rolling ring alone.
+  const visibleWindows = minimal
+    ? (rolling === undefined ? [] : [rolling])
+    : windows
   const pool = poolView(stateHasUsage(state) ? state.usage : undefined)
   const plan = planLabel(state?.usage?.subscription?.planId)
   const hasUsage = stateHasUsage(state)
@@ -379,11 +407,20 @@ export function UsageDock(): ReactElement {
         onPointerMove={moveDrag}
         onPointerUp={finishDrag}
         onPointerCancel={cancelDrag}
-        title="Command Code 用量：剩余额度 / 5h 滚动 / 本周（拖拽可移动）"
+        title={minimal
+          ? 'Command Code 用量：仅 5h 滚动（极简模式，拖拽可移动）'
+          : 'Command Code 用量：5h 滚动 / 本周 / 本月（拖拽可移动）'}
         aria-expanded={open}
         aria-label="Command Code 用量"
       >
-        {windows.length > 0 ? (
+        {minimal ? (
+          rolling !== undefined ? (
+            // Minimal mode: a single 5h-rolling ring, no countdown, no labels.
+            <Ring window={rolling} now={now} size={34} />
+          ) : (
+            <span className="ccu-badge-text">Cmd Code —</span>
+          )
+        ) : windows.length > 0 ? (
           <>
             {windows.map((window) => <Ring key={window.key} window={window} now={now} size={34} />)}
             {rolling !== undefined && (
@@ -401,7 +438,9 @@ export function UsageDock(): ReactElement {
         ) : (
           <span className="ccu-badge-text">Cmd Code —</span>
         )}
-        <span className="ccu-dot" data-state={dotState} aria-hidden="true" />
+        {/* Minimal mode keeps strictly the single ring: the health dot would be
+            the only other element on the badge, so it stays hidden. */}
+        {!minimal && <span className="ccu-dot" data-state={dotState} aria-hidden="true" />}
       </button>
 
       {open && (
@@ -425,6 +464,19 @@ export function UsageDock(): ReactElement {
               </span>
             </div>
             <div className="ccu-head-actions">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={minimal}
+                className="ccu-minimal"
+                onClick={() => setMinimal((prev) => !prev)}
+                title="极简模式：仅显示 5h 滚动环"
+              >
+                <span className="ccu-minimal-label">极简</span>
+                <span className="ccu-minimal-track" aria-hidden="true">
+                  <span className="ccu-minimal-thumb" />
+                </span>
+              </button>
               <button type="button" className="ccu-icon-btn" onClick={requestClose} aria-label="关闭">✕</button>
             </div>
           </header>
@@ -444,26 +496,19 @@ export function UsageDock(): ReactElement {
                 </div>
               )}
 
+              {/* The pool headline is the account-level balance. Its sources are
+                  restated here because the monthly row below tracks the pooled
+                  grant, not the individual sources. */}
               {pool !== undefined && (
                 <div className="ccu-pool">
                   <div className="ccu-pool-top">
                     <span className="ccu-pool-remaining">{formatCredits(pool.remaining)}</span>
                     <span className="ccu-pool-pct">
-                      {pool.percentUsed === null
-                        ? '额度已用 —'
-                        : `额度已用 ${Math.round(pool.percentUsed)}%`}
-                      {pool.spent === null ? '' : ` · 本期已花 ${formatCredits(pool.spent)}`}
+                      {pool.spent === null
+                        ? '剩余额度'
+                        : `本期已花 ${formatCredits(pool.spent)}`}
                     </span>
                   </div>
-                  {pool.percentUsed !== null && (
-                    <div className="ccu-bar" role="img" aria-label={`额度已用 ${Math.round(pool.percentUsed)}%`}>
-                      <div
-                        className="ccu-bar-fill"
-                        data-tone={percentTone(pool.percentUsed)}
-                        style={{ width: `${Math.min(100, pool.percentUsed)}%` }}
-                      />
-                    </div>
-                  )}
                   <div className="ccu-sources">
                     <span>订阅 {formatCredits(pool.monthly)}</span>
                     {pool.purchased > 0 && <span>购买 {formatCredits(pool.purchased)}</span>}
@@ -472,12 +517,12 @@ export function UsageDock(): ReactElement {
                 </div>
               )}
 
-              {windows.length > 0 ? (
+              {visibleWindows.length > 0 ? (
                 <div className="ccu-windows">
-                  {windows.map((window) => <WindowRow key={window.key} window={window} now={now} />)}
+                  {visibleWindows.map((window) => <WindowRow key={window.key} window={window} now={now} />)}
                 </div>
               ) : (
-                <p className="ccu-note">该套餐未返回 5h / 本周滚动额度窗口。</p>
+                <p className="ccu-note">该套餐未返回任何额度窗口。</p>
               )}
 
               {state.usage.summary !== undefined && (
@@ -597,8 +642,9 @@ function WindowRow({ window, now }: { window: WindowView; now: number }): ReactE
         <div className="ccu-row-meta">
           <span className="ccu-row-credits">
             <span className="ccu-row-dot" data-tone={tone} aria-hidden="true" />
-            {formatCredits(window.used)} / {formatCredits(window.cap)}（{Math.round(window.percent)}%）
+            已用 {formatCredits(window.used)} / {formatCredits(window.cap)}（{Math.round(window.percent)}%）
           </span>
+          <span className="ccu-row-remain">剩余 {formatCredits(window.remaining)}</span>
         </div>
         <div className="ccu-row-countdown" data-expired={window.resetAt !== null && window.resetAt <= now ? 'true' : undefined}>
           重置于 {formatRemaining(window.resetAt, now)}

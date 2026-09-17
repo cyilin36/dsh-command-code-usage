@@ -9,7 +9,7 @@
  */
 import type { CommandCodeUsage, CommandCodeUsageState } from '../types.ts';
 /** The rolling credit windows Command Code meters, in display order. */
-export type WindowKey = 'fiveHour' | 'weekly';
+export type WindowKey = 'fiveHour' | 'weekly' | 'monthly';
 /** One credit window in display order. */
 export interface WindowView {
     key: WindowKey;
@@ -29,6 +29,14 @@ export interface WindowView {
     resetAt: number | null;
     /** Full window period in millis (drives the remaining-time ring). */
     periodMs: number;
+    /**
+     * True when this row was reconstructed from the credit pool rather than read
+     * from an API window — the monthly row when `windowLimits` carries no
+     * `monthly`. Informational only: the row renders and behaves identically, so
+     * the flag exists for tests and future surfacing, not for the UI to treat
+     * second-class data as second-class.
+     */
+    derived: boolean;
 }
 /** Tone thresholds for usage rings; `danger` ≥ 85%, `warn` ≥ 60%. */
 export type UsageTone = 'ok' | 'warn' | 'danger';
@@ -53,7 +61,7 @@ export interface PanelLayout {
 }
 /** Gap between the badge and the panel, in px. */
 export declare const PANEL_GAP_PX = 12;
-/** Window periods: the rolling window is a fixed 5h, weekly a fixed 7d. */
+/** Window periods: 5h rolling and weekly are fixed; monthly is a 30-day cycle. */
 export declare const WINDOW_PERIOD_MS: Record<WindowKey, number>;
 /**
  * Clamp a dock position so the badge stays fully inside the viewport.
@@ -73,7 +81,21 @@ export declare function computePanelLayout(pos: DockPosition, badgeSize: BoxSize
     w: number;
     h: number;
 }): PanelLayout;
-/** Project a sample's credit windows into ordered views (missing windows dropped). */
+/**
+ * Project a sample into ordered credit-window views.
+ *
+ * `fiveHour` and `weekly` come from the API's `windowLimits`. The `monthly` row
+ * is the API's own window when one is reported, and otherwise reconstructed
+ * from the credit pool — the same `remaining / (remaining + spent)` derivation
+ * the pool headline uses, with the reset instant taken from the billing
+ * period's end. A plan that reports neither a monthly window nor a spend total
+ * gets no monthly row, because there would be no honest percentage to show.
+ *
+ * Windows are ordered 5h → 本周 → 本月 for display, matching the sibling
+ * OpenCode Go monitor.
+ * @param usage - the fetched sample, or `undefined` before the first success.
+ * @returns the projected rows, in display order.
+ */
 export declare function usageWindows(usage: CommandCodeUsage | undefined): WindowView[];
 /** The credit pool headline, or `undefined` when the API reported no credits. */
 export interface PoolView {
